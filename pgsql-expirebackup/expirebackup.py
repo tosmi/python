@@ -1,11 +1,15 @@
 #!/bin/env python
 
-""":Synopsis: expire postgresql backups and wals
+"""expire postgresql backups and wals
 
-**Source Code:** `expirebackup.py`
+this script search for postgresql backup files and removes all files
+older than PGBCK_KEEP_DAYS or the number of days specified with -k.
 
----------------
-
+We search for all *.backup files in the archived wal directory and
+create PgsqlBackup objects from the metadata in these files. Than we
+search for the youngest PgsqlBackup object that is older than
+PGBCK_KEEP_DAYS. finally we remove all full backups and archived wals
+older than this PgsqlBackup object.
 """
 import sys
 import os
@@ -20,7 +24,12 @@ from optparse import OptionParser
 logger = logging.getLogger('expirebackup')
 
 class PgsqlBackup(object):
-    """parses a wal.backup file
+    """parses a wal.backup file and parse the metadata into an
+    PgsqlBackup object. we store the following data:
+
+    - `label`: the label of this backup
+    - `stop_wal`: the wal file name when the backup stopped
+    - `stop_time`: the time the backup stopped
 
     example input:
 
@@ -101,7 +110,7 @@ def parse_args():
     parser.add_option("-w","--warch", dest="warch",
                       help="archived wal logs location")
     parser.add_option("-k", "--keepdays", dest="keepdays",
-                      help="how long should we keep backups in days")
+                      help="how long should we keep backups in days. overwrites PGBCK_KEEP_DAYS if set.")
     (options, args) = parser.parse_args()
     return options
 
@@ -142,6 +151,21 @@ def gen_backups(files):
         yield b
 
 def find_expire(backups, keep_days):
+    """searches all backups found for the newest backup we
+    should expire.
+
+    the algorithm is as follows:
+
+    1. iterate over all backup
+    2. if the backup stop time is older than now() - delta then this is
+       a candiate to expire
+    3. if there is a previous backup to expire, check if the current backup
+       is older than the previous
+    4. if YES keep the previous backup
+    5. if NO keep the current backup
+
+    finally return the backup to expire
+    """
     from datetime import timedelta
 
     expire = None
@@ -149,23 +173,37 @@ def find_expire(backups, keep_days):
     now    = datetime.now()
 
     tmp = None
-    ptmp = None
     for b in backups:
-        logger.debug('is the backup (%s) smaller as now - delta (%s)' % (b.stop_time, now - delta))
+        logger.debug('is the backup with label %s (%s) smaller as now - delta (%s)' % (b.label, b.stop_time, now - delta))
         if b.stop_time < now - delta:
-            tmp = b
+            logger.debug('found backup %s to expire (%s)' % (b.label, b.stop_time, ))
+            expire = b
         if tmp is not None:
-            if ptmp is not None:
-                if tmp.stop_time < ptmp.stop_time:
-                    tmp = ptmp
-                else:
-                    ptmp = tmp
-
-    print expire
+            logger.debug('there is a previous backup %s to expire (%s)' % (b.label, b.stop_time, ))
+            if expire.stop_time < tmp.stop_time:
+                logger.debug('the current backup %s (%s) is older than the previous backup %s (%s), so we keep the previous one' % (expire.label, expire.stop_time, tmp.label, tmp.stop_time ))
+                expire = tmp
+        else:
+            tmp = expire
+    logger.debug('going to expire all backup data older than %s' % (expire.stop_time) )
     return expire
 
-def remove_backups(expire):
-    print expire
+def find_files_older(files, datetime):
+    for f in files:
+        ftime = datetime.fromtimestamp(os.stat(f).st_mtime)
+        if ftime < datetime:
+            yield (f, ftime)
+
+def remove_backups(backup, arch_wal_dir, bck_dir):
+    """search for all files older than backup.stop_time in arch_wal_dir and bck_dir
+    and remove them.
+    """
+    files    = find_files(arch_wal_dir, '*')
+    rm_files = find_files_older(files, backup.stop_time)
+
+    for f, datetime in rm_files:
+        logger.debug('going to remove %s with date %s' % (f, datetime) )
+        # os.unlink(f)
 
 def expire_backups(options):
     """search for .backup files in the wal log archive folder. expires
@@ -176,10 +214,10 @@ def expire_backups(options):
     bck_dir      = '/'.join([warch_dir, 'data'])
     keep_days    = None
 
-    if 'PGBCK_KEEP_DAYS' in os.environ:
-        keep_days = os.environ['PGBCK_KEEP_DAYS']
-    elif options.keepdays:
+    if options.keepdays:
         keep_days = options.keepdays
+    elif 'PGBCK_KEEP_DAYS' in os.environ:
+        keep_days = os.environ['PGBCK_KEEP_DAYS']
     else:
         logger.error('You must specify how long we should keep backups, either via PGBCK_KEEP_DAYS or -k!')
         sys.exit(1)
@@ -192,7 +230,7 @@ def expire_backups(options):
     backups         = gen_backups(bck_files)
     expire          = find_expire(backups, keep_days)
 
-    remove_backups(expire)
+    remove_backups(expire, arch_wal_dir, bck_dir)
 
 
 if __name__ == '__main__':
