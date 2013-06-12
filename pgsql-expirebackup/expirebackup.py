@@ -29,8 +29,8 @@ class PgsqlBackup(object):
     the metadata. we store the following data:
 
     - `label`: the label of this backup
-    - `stop_wal`: the wal file name when the backup stopped
-    - `stop_time`: the time the backup stopped
+    - `start_wal`: the wal file name when the backup stopped
+    - `start_time`: the time the backup stopped
 
     example input:
 
@@ -45,14 +45,14 @@ class PgsqlBackup(object):
     """
     def __init__(self, data=None):
         self.label = None
-        self.stop_wal = None
-        self.stop_time = None
+        self.start_wal = None
+        self.start_time = None
 
         for line in data:
             self.parse_data( line.strip() )
 
-        logger.debug('found wal data, stop_wal=%s, stop_time=%s, label=%s'
-                     % (self.stop_wal, self.stop_time, self.label))
+        logger.debug('found wal data, start_wal=%s, start_time=%s, label=%s'
+                     % (self.start_wal, self.start_time, self.label))
 
     def __str__(self,):
         str = ""
@@ -63,12 +63,12 @@ class PgsqlBackup(object):
     def parse_data(self, line):
         """parses the line and set PgsqlBackup attribute accordingly.
         """
-        if 'STOP WAL' in line:
+        if 'START WAL' in line:
             m = re.search(r'file\s(?P<file>\d+)', line)
-            self.stop_wal = m.group('file')
-        elif 'STOP TIME' in line:
+            self.start_wal = m.group('file')
+        elif 'START TIME' in line:
             m = re.search(r'TIME:\s(?P<datetime>.*$)', line)
-            self.stop_time = datetime.strptime(m.group('datetime'),
+            self.start_time = datetime.strptime(m.group('datetime'),
                                                "%Y-%m-%d %H:%M:%S %Z")
         elif 'LABEL' in line:
             m = re.search(r'LABEL:\s(?P<label>.*$)', line)
@@ -151,7 +151,6 @@ def find_files(directory, pattern):
     stolen from http://www.dabeaz.com/generators/
     """
     for path, dirlist, filelist in os.walk(directory):
-        print (dirlist, pattern)
         for name in fnmatch.filter(filelist, pattern):
             yield os.path.join(path, name)
 
@@ -212,34 +211,42 @@ def find_expire(backups, keep_days):
 
     tmp = None
     for b in backups:
-        logger.debug('is the backup with label %s (%s) smaller as now - delta (%s)' % (b.label, b.stop_time, now - delta))
-        if b.stop_time < now - delta:
-            logger.debug('found backup %s to expire (%s)' % (b.label, b.stop_time, ))
+        logger.debug('is the backup with label %s (%s) smaller as now - delta (%s)' % (b.label, b.start_time, now - delta))
+        if b.start_time < now - delta:
+            logger.debug('found backup %s to expire (%s)' % (b.label, b.start_time, ))
             expire = b
         if tmp is not None:
-            logger.debug('there is a previous backup %s to expire (%s)' % (b.label, b.stop_time, ))
-            if expire.stop_time < tmp.stop_time:
-                logger.debug('the current backup %s (%s) is older than the previous backup %s (%s), so we keep the previous one' % (expire.label, expire.stop_time, tmp.label, tmp.stop_time ))
+            logger.debug('there is a previous backup %s to expire (%s)' % (b.label, b.start_time, ))
+            if expire.start_time < tmp.start_time:
+                logger.debug('the current backup %s (%s) is older than the previous backup %s (%s), so we keep the previous one' % (expire.label, expire.start_time, tmp.label, tmp.start_time ))
                 expire = tmp
         else:
             tmp = expire
-    logger.debug('going to expire all backup data older than %s' % (expire.stop_time) )
+
+    if expire is not None:
+        logger.debug('going to expire all backup data older than %s' % (expire.start_time) )
+    else:
+        logger.debug('not backup found to expire')
+
     return expire
 
 def remove_backups(backup, arch_wal_dir, bck_dir):
-    """search for all files older than backup.stop_time in arch_wal_dir and bck_dir
+    """search for all files older than backup.start_time in arch_wal_dir and bck_dir
     and remove them.
     """
+    import shutil
+
     wal_files    = find_files(arch_wal_dir, '*')
-    rm_wal_files = find_files_older(wal_files, backup.stop_time)
+    rm_wal_files = find_files_older(wal_files, backup.start_time)
     for f, datetime in rm_wal_files:
         logger.debug('going to remove wal %s with date %s' % (f, datetime) )
-        # os.unlink(f)
+        os.unlink(f)
 
     bck_files = find_directories(bck_dir, '*bck*')
-    rm_bck_files = find_files_older(bck_files, datetime )
+    rm_bck_files = find_files_older(bck_files, backup.start_time )
     for f, datetime in rm_bck_files:
         logger.debug('going to remove full backup %s with date %s' % (f, datetime) )
+        shutil.rmtree(f)
 
 def expire_backups(options):
     """search for .backup files in the wal log archive folder. expires
@@ -266,7 +273,8 @@ def expire_backups(options):
     backups         = gen_backups(bck_files)
     expire          = find_expire(backups, keep_days)
 
-    remove_backups(expire, arch_wal_dir, bck_dir)
+    if expire is not None:
+        remove_backups(expire, arch_wal_dir, bck_dir)
 
 if __name__ == '__main__':
     options = parse_args()
