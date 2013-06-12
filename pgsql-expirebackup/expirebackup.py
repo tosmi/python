@@ -1,8 +1,7 @@
 #!/bin/env python
-
 """expire postgresql backups and wals
 
-this script search for postgresql backup files and removes all files
+This script searches for postgresql backup files and removes all files
 older than PGBCK_KEEP_DAYS or the number of days specified with -k.
 
 We search for all *.backup files in the archived wal directory and
@@ -21,11 +20,13 @@ import re
 from datetime import datetime
 from optparse import OptionParser
 
+
 logger = logging.getLogger('expirebackup')
 
+
 class PgsqlBackup(object):
-    """parses a wal.backup file and parse the metadata into an
-    PgsqlBackup object. we store the following data:
+    """parses a wal.backup file and creates a PgsqlBackup object from
+    the metadata. we store the following data:
 
     - `label`: the label of this backup
     - `stop_wal`: the wal file name when the backup stopped
@@ -47,9 +48,11 @@ class PgsqlBackup(object):
         self.stop_wal = None
         self.stop_time = None
 
-        [ self.parse_data( l.strip() ) for l in data]
+        for line in data:
+            self.parse_data( line.strip() )
 
-        logger.debug('found wal data, stop_wal=%s, stop_time=%s, label=%s' % (self.stop_wal, self.stop_time, self.label))
+        logger.debug('found wal data, stop_wal=%s, stop_time=%s, label=%s'
+                     % (self.stop_wal, self.stop_time, self.label))
 
     def __str__(self,):
         str = ""
@@ -58,26 +61,30 @@ class PgsqlBackup(object):
         return str
 
     def parse_data(self, line):
+        """parses the line and set PgsqlBackup attribute accordingly.
+        """
         if 'STOP WAL' in line:
-            m = re.search('file\s(?P<file>\d+)',line)
+            m = re.search(r'file\s(?P<file>\d+)', line)
             self.stop_wal = m.group('file')
         elif 'STOP TIME' in line:
-            m = re.search('TIME:\s(?P<datetime>.*$)', line)
-            self.stop_time = datetime.strptime(m.group('datetime'), "%Y-%m-%d %H:%M:%S %Z")
+            m = re.search(r'TIME:\s(?P<datetime>.*$)', line)
+            self.stop_time = datetime.strptime(m.group('datetime'),
+                                               "%Y-%m-%d %H:%M:%S %Z")
         elif 'LABEL' in line:
-            m = re.search('LABEL:\s(?P<label>.*$)', line)
+            m = re.search(r'LABEL:\s(?P<label>.*$)', line)
             self.label = m.group('label')
 
 
 def setup_logging(options=None):
-    """setup our log infrastructure, of logfile is None or we are not
-    able to open the log, revert to stdout
+    """setup our log infrastructure, if --stdout is specified log to
+    stdout, otherwise log to ../log/expirebackup.log. if opening the
+    logfile fails log to stdout.
     """
     MAXLOGFILESIZE = 2097152
     BACKUPCOUNT    = 1
 
     defaultLogHandler = None
-    logFormat         = logging.Formatter("%(asctime)s: %(name)s: %(levelname)s - %(message)s")
+    logFormat         = logging.Formatter("%(asctime)s: %(name)s:%(levelname)s - %(message)s")
 
     streamLogHandler = logging.StreamHandler(sys.stdout)
     streamLogHandler.setFormatter(logFormat)
@@ -86,7 +93,9 @@ def setup_logging(options=None):
     if not options.stdout:
         logfile = '/'.join([sys.path[0], '../log/expirebackup.log'])
         try:
-            defaultLogHandler = logging.handlers.RotatingFileHandler(logfile, maxBytes=MAXLOGFILESIZE, backupCount=BACKUPCOUNT)
+            defaultLogHandler = logging.handlers.RotatingFileHandler(logfile,
+                                                                     maxBytes=MAXLOGFILESIZE,
+                                                                     backupCount=BACKUPCOUNT)
             defaultLogHandler.setFormatter(logFormat)
         except IOError, (errno, strerror):
             logger.warning("Could not openlogfile %s, using STDOUT " % (logfile) )
@@ -107,7 +116,7 @@ def parse_args():
     parser.add_option("-d", "--debug", dest="debug", action="store_true",
                       help="enable debug output")
     parser.add_option("--stdout", dest="stdout", action="store_true")
-    parser.add_option("-w","--warch", dest="warch",
+    parser.add_option("-w", "--warch", dest="warch",
                       help="archived wal logs location")
     parser.add_option("-k", "--keepdays", dest="keepdays",
                       help="how long should we keep backups in days. overwrites PGBCK_KEEP_DAYS if set.")
@@ -115,6 +124,10 @@ def parse_args():
     return options
 
 def get_warch_location(options):
+    """ return the archived wal location. if -w is specified check
+    this directory, else use PGBCK. if both are missing exit 1. if the
+    warch location is not a directory exit 1.
+    """
     warch_location = None
     if options.warch:
         warch_location = options.warch
@@ -127,15 +140,38 @@ def get_warch_location(options):
     else:
         logger.debug("warch location is %s" % (warch_location))
 
+    if not os.path.isdir(warch_location):
+        logger.error('warch location %s is not a directory or inaccessible, exit!' % (warch_location) )
+        sys.exit(1)
+
     return warch_location
 
 def find_files(directory, pattern):
-    """return a generator of all files in directory matching pattern
+    """return a generator of all files in directory matching pattern.
     stolen from http://www.dabeaz.com/generators/
     """
     for path, dirlist, filelist in os.walk(directory):
-        for name in fnmatch.filter(filelist,pattern):
-            yield os.path.join(path,name)
+        print (dirlist, pattern)
+        for name in fnmatch.filter(filelist, pattern):
+            yield os.path.join(path, name)
+
+def find_directories(directory, pattern):
+    """return a generator of all subdirectories in directory matching
+    pattern.  stolen from http://www.dabeaz.com/generators/
+    """
+
+    for path, dirlist, filelist in os.walk(directory):
+        for name in fnmatch.filter(dirlist, pattern):
+            yield os.path.join(path, name)
+
+def find_files_older(files, datetime):
+    """return files older than datetime
+    """
+    for f in files:
+        ftime = datetime.fromtimestamp(os.stat(f).st_mtime)
+        if ftime < datetime:
+            yield (f, ftime)
+
 
 def open_files(filenames):
     """open filenames an return a file object.
@@ -145,6 +181,8 @@ def open_files(filenames):
         yield open(name)
 
 def gen_backups(files):
+    """generates backup object from wal backup file content
+    """
     for f in files:
         data = f.readlines()
         b = PgsqlBackup(data)
@@ -156,7 +194,7 @@ def find_expire(backups, keep_days):
 
     the algorithm is as follows:
 
-    1. iterate over all backup
+    1. iterate over all backups
     2. if the backup stop time is older than now() - delta then this is
        a candiate to expire
     3. if there is a previous backup to expire, check if the current backup
@@ -188,22 +226,20 @@ def find_expire(backups, keep_days):
     logger.debug('going to expire all backup data older than %s' % (expire.stop_time) )
     return expire
 
-def find_files_older(files, datetime):
-    for f in files:
-        ftime = datetime.fromtimestamp(os.stat(f).st_mtime)
-        if ftime < datetime:
-            yield (f, ftime)
-
 def remove_backups(backup, arch_wal_dir, bck_dir):
     """search for all files older than backup.stop_time in arch_wal_dir and bck_dir
     and remove them.
     """
-    files    = find_files(arch_wal_dir, '*')
-    rm_files = find_files_older(files, backup.stop_time)
-
-    for f, datetime in rm_files:
-        logger.debug('going to remove %s with date %s' % (f, datetime) )
+    wal_files    = find_files(arch_wal_dir, '*')
+    rm_wal_files = find_files_older(wal_files, backup.stop_time)
+    for f, datetime in rm_wal_files:
+        logger.debug('going to remove wal %s with date %s' % (f, datetime) )
         # os.unlink(f)
+
+    bck_files = find_directories(bck_dir, '*bck*')
+    rm_bck_files = find_files_older(bck_files, datetime )
+    for f, datetime in rm_bck_files:
+        logger.debug('going to remove full backup %s with date %s' % (f, datetime) )
 
 def expire_backups(options):
     """search for .backup files in the wal log archive folder. expires
@@ -231,7 +267,6 @@ def expire_backups(options):
     expire          = find_expire(backups, keep_days)
 
     remove_backups(expire, arch_wal_dir, bck_dir)
-
 
 if __name__ == '__main__':
     options = parse_args()
