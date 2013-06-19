@@ -19,7 +19,7 @@ import re
 
 from datetime import datetime
 from optparse import OptionParser
-
+from datetime import timedelta
 
 logger = logging.getLogger('expirebackup')
 
@@ -203,7 +203,7 @@ def find_expire(backups, keep_days):
 
     finally return the backup to expire
     """
-    from datetime import timedelta
+
 
     expire = None
     delta  = timedelta( int(keep_days) )
@@ -265,8 +265,11 @@ def expire_backups(options):
         logger.error('You must specify how long we should keep backups, either via PGBCK_KEEP_DAYS or -k!')
         sys.exit(1)
 
+    delta  = timedelta( int(keep_days) )
+    now    = datetime.now()
+
     logger.debug("archived wal location is %s, backup dir is %s" % (arch_wal_dir, bck_dir))
-    logger.debug("will keep backups older than %s days" % (keep_days))
+    logger.debug("will expire backups older than %s days (%s)" % (keep_days, now - delta))
 
     bck_files_names = find_files(arch_wal_dir, '*.backup')
     bck_files       = open_files(bck_files_names)
