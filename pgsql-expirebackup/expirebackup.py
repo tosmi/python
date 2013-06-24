@@ -51,8 +51,8 @@ class PgsqlBackup(object):
         for line in data:
             self.parse_data( line.strip() )
 
-        logger.debug('found wal data, start_wal=%s, start_time=%s, label=%s'
-                     % (self.start_wal, self.start_time, self.label))
+        # logger.debug('found wal data, start_wal=%s, start_time=%s, label=%s'
+        #             % (self.start_wal, self.start_time, self.label))
 
     def __str__(self,):
         str = ""
@@ -209,19 +209,18 @@ def find_expire(backups, keep_days):
     delta  = timedelta( int(keep_days) )
     now    = datetime.now()
 
-    tmp = None
+    # tmp = None
     for b in backups:
         logger.debug('is the backup with label %s (%s) smaller as now - delta (%s)' % (b.label, b.start_time, now - delta))
         if b.start_time < now - delta:
             logger.debug('found backup %s to expire (%s)' % (b.label, b.start_time, ))
-            expire = b
-        if tmp is not None:
-            logger.debug('there is a previous backup %s to expire (%s)' % (b.label, b.start_time, ))
-            if expire.start_time < tmp.start_time:
-                logger.debug('the current backup %s (%s) is older than the previous backup %s (%s), so we keep the previous one' % (expire.label, expire.start_time, tmp.label, tmp.start_time ))
-                expire = tmp
-        else:
-            tmp = expire
+            if expire is not None:
+                logger.debug('there is a previous backup %s to expire (%s)' % (expire.label, expire.start_time, ))
+                if expire.start_time < b.start_time:
+                    logger.debug('the current backup %s (%s) is younger than the previous backup %s (%s), so this is our new backup to expire' % (b.label, b.start_time, expire.label, expire.start_time ))
+                    expire = b
+            else:
+                expire = b
 
     if expire is not None:
         logger.debug('going to expire all backup data older than %s' % (expire.start_time) )
