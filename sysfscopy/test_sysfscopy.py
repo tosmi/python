@@ -14,7 +14,8 @@ import sysfscopy
 
 class TestSysfsCopy(unittest.TestCase):
     def test_sysfscopy(self,):
-        self.assertTrue(sysfscopy.sysfscopy('/sys/class/net', '/tmp'))
+        sc = sysfscopy.SysfsCopy()
+        sc.sysfscopy('/sys/class/net', '/tmp/test')
 
 def suite():
     tests = [ 'test_sysfscopy', ]
