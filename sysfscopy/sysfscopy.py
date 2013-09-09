@@ -25,16 +25,7 @@ class SysfsCopy(object):
 
         for filename in os.listdir(source):
             fqfilename = os.path.join(source, filename)
-            if os.path.islink(fqfilename):
-                if os.path.isdir(fqfilename):
-                    src_dir = os.path.join(source, filename)
-                    dest_dir = os.path.join(destination, filename)
-                    os.mkdir(dest_dir)
-                    self._copy_directory(source, destination)
-                    if self._currdepth < self.maxdepth:
-                        self._currdepth+=1
-                        self.sysfscopy(src_dir, dest_dir)
-            elif os.path.isdir(fqfilename):
+            if os.path.isdir(fqfilename):
                     src_dir = os.path.join(source, filename)
                     dest_dir = os.path.join(destination, filename)
                     os.mkdir(dest_dir)
@@ -43,7 +34,6 @@ class SysfsCopy(object):
                         self._currdepth+=1
                         self.sysfscopy(src_dir, dest_dir)
             elif os.path.isfile(fqfilename):
-                print (fqfilename, destination)
                 self._copyfile(fqfilename, destination)
 
         self._currdepth -= 1
