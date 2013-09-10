@@ -13,10 +13,6 @@ file.
 import shutil
 import os
 
-class SysfsCopyFailedException(Exception):
-    def __init__(self):
-        pass
-
 class SysfsCopy(object):
     """copy files an directories up to a certain depth. it's main use is
     to copy parts of sysfs as there are filesystem loop within sysfs.
